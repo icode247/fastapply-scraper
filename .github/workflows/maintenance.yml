@@ -1,0 +1,66 @@
+name: Maintenance
+
+# The worker's non-fanout housekeeping loops (worker.js:42-100), each as a one-shot on its
+# own cron cadence. Workable marketplace is intentionally excluded — it stays on the Mac.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # description + classification backfills
+    - cron: "0 * * * *"    # dead-job pruning (hourly)
+    - cron: "30 3 * * *"   # daily: stale-job cleanup + anomaly alert
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Run one task manually: desc | classify | deadjobs | stale | anomaly"
+        required: false
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write # anomaly detector opens an Issue
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # --- every 15 min: backfills ---
+      - name: Description backfill
+        if: github.event.schedule == '*/15 * * * *' || github.event.inputs.task == 'desc'
+        run: node maintenance-once.js --task desc
+      - name: Classification backfill
+        if: github.event.schedule == '*/15 * * * *' || github.event.inputs.task == 'classify'
+        run: node maintenance-once.js --task classify
+
+      # --- hourly: dead-job pruning ---
+      - name: Dead-job pruning
+        if: github.event.schedule == '0 * * * *' || github.event.inputs.task == 'deadjobs'
+        run: node maintenance-once.js --task deadjobs
+
+      # --- daily: stale cleanup + anomaly alert ---
+      - name: Stale-job cleanup
+        if: github.event.schedule == '30 3 * * *' || github.event.inputs.task == 'stale'
+        run: node maintenance-once.js --task stale
+      - name: Anomaly check
+        id: anomaly
+        if: github.event.schedule == '30 3 * * *' || github.event.inputs.task == 'anomaly'
+        run: node anomaly-check.js
+      - name: Open anomaly issue
+        if: steps.anomaly.outputs.anomaly == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ steps.anomaly.outputs.report }}
+        run: printf '%s\n' "$REPORT" | gh issue create --title "Scraper anomaly $(date -u +%F)" --body-file -
