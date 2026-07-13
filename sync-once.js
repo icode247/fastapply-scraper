@@ -120,8 +120,9 @@ async function syncWithRetry(company) {
       // fail fast so the run doesn't crawl to a halt on dead slugs. 429/5xx/network = retry.
       const dead4xx = /\b(400|401|403|404|410)\b/.test(msg) || (/HTTP 4\d\d/.test(msg) && !msg.includes('429'));
       if (attempt < maxAttempts && !dead4xx) { await sleep(2 ** attempt * 1000); continue; }
-      // Final failure: mark failed unless it's rate-limiting (they succeed next cycle).
-      if (!DRY_RUN && !String(e.message).includes('429')) {
+      // Final failure: mark failed unless it's transient (rate-limit or connection cap) —
+      // those succeed next cycle and must not retire a live company.
+      if (!DRY_RUN && !/429|too many connections/i.test(msg)) {
         try { await companiesRepo.markFailed(company.id, e.message); } catch { /* non-fatal */ }
       }
       logger.warn({ companyId: company.id, ats: company.ats, err: e.message }, 'sync failed (retries exhausted)');
@@ -133,7 +134,20 @@ async function syncWithRetry(company) {
 
 (async () => {
   const t0 = Date.now();
-  const due = await companiesRepo.findDueForSync({ shard: SHARD, shardCount: SHARD_COUNT, limit: LIMIT });
+  // Claim the due-set. Retry on connection pressure — essential-2 caps the role at 40
+  // connections shared with the worker + web + local crawlers, so a shard can transiently
+  // fail to open its claim connection. Back off and retry rather than crash the shard.
+  let due;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      due = await companiesRepo.findDueForSync({ shard: SHARD, shardCount: SHARD_COUNT, limit: LIMIT });
+      break;
+    } catch (e) {
+      if (attempt >= 6) throw e;
+      logger.warn({ err: e.message, attempt }, 'claim retry (connection pressure?)');
+      await sleep(2500 * attempt + Math.random() * 1000);
+    }
+  }
   logger.info({ shard: SHARD, shardCount: SHARD_COUNT, due: due.length, concurrency: CONCURRENCY, dryRun: DRY_RUN }, 'sync-once start');
 
   let i = 0, added = 0, removed = 0, failed = 0, done = 0;

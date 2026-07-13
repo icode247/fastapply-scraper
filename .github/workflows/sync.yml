@@ -1,7 +1,7 @@
 name: Sync Jobs
 
-# Hourly company sync — replaces the Heroku worker's BullMQ fanout. 16 parallel shards
-# (sharded by company.id % 16 so they never overlap) each drain their slice of the
+# Hourly company sync — replaces the Heroku worker's BullMQ fanout. 8 parallel shards
+# (sharded by company.id % 8 so they never overlap) each drain their slice of the
 # due-set, crawl via the ATS adapters, and UPSERT into the shared Postgres.
 #
 # Free on a PUBLIC repo (unlimited Actions minutes). DATABASE_URL is an encrypted secret.
@@ -26,15 +26,18 @@ jobs:
     strategy:
       fail-fast: false # one bad shard must not cancel the other 15
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       NODE_ENV: production
-      CONCURRENCY: "12"
-      PG_POOL_MAX: "14"
+      # essential-2 caps this DB role at 40 connections, shared with the worker + web +
+      # local crawlers (~15-19 baseline). 8 shards x PG_POOL_MAX 2 = 16 keeps us under 40.
+      # Bump both once the worker is scaled to 0 (frees ~15) for more parallelism.
+      CONCURRENCY: "2"
+      PG_POOL_MAX: "2"
       SHARD: ${{ matrix.shard }}
-      SHARD_COUNT: "16"
-      LIMIT: "50000" # no real cap — the id%16 shard + 60-min staleness bound the batch
+      SHARD_COUNT: "8"
+      LIMIT: "50000" # no real cap — the id%8 shard + 60-min staleness bound the batch
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
