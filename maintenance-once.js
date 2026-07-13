@@ -20,6 +20,8 @@ const { backfillDescriptions } = require('./src/tasks/backfill-descriptions');
 const { backfillClassifications } = require('./src/tasks/backfill-classifications');
 const { pruneDeadJobs } = require('./src/tasks/dead-job-check');
 
+process.on('unhandledRejection', (err) => logger.warn({ err: err?.message }, 'unhandledRejection (ignored)'));
+
 const arg = (name, def) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : def; };
 const TASK = arg('task', process.env.TASK || '');
 

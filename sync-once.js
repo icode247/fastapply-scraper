@@ -19,6 +19,11 @@ const { extractSalary, extractWorkplaceType, extractEmploymentType } = require('
 const { stripHtml } = require('./src/utils/html');
 const { classifyJob } = require('./src/utils/classify');
 
+// One company's adapter floating a rejecting promise must not crash the whole shard.
+// The worker guarded this the same way (worker.js:143); without it, Node 20 makes an
+// unhandled rejection fatal and the shard dies mid-run (the shard-9 first-run failure).
+process.on('unhandledRejection', (err) => logger.warn({ err: err?.message }, 'unhandledRejection (ignored)'));
+
 const arg = (name, def) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : def; };
 const SHARD = parseInt(arg('shard', process.env.SHARD || '0'), 10);
 const SHARD_COUNT = parseInt(arg('shard-count', process.env.SHARD_COUNT || '1'), 10);
