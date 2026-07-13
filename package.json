@@ -1,0 +1,18 @@
+{
+  "name": "fastapply-scraper",
+  "version": "1.0.0",
+  "description": "Stateless job-scrape compute for fastapply — runs on GitHub Actions, writes to the shared Postgres. No Redis, no queue.",
+  "private": false,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "sync": "node sync-once.js",
+    "maintenance": "node maintenance-once.js"
+  },
+  "dependencies": {
+    "pg": "^8.20.0",
+    "pino": "^10.3.1",
+    "undici": "^7.28.0"
+  }
+}
